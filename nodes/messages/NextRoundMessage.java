@@ -36,23 +36,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package projects.chandra_toueg.nodes.messages;
 
-import projects.sanders.nodes.messages.Requester;
+import sinalgo.nodes.messages.Message;
 
-import java.util.Comparator;
-
-public class ProposeValueComparator implements Comparator<ProposeValueMessage> {
-    @Override
-    public int compare(ProposeValueMessage o1, ProposeValueMessage o2) {
-        if (o1.getTimestamp() > o2.getTimestamp()) {
-            return -1;
-        } else if (o1.getTimestamp() < o2.getTimestamp()) {
-            return 1;
-        } else if (o1.getValue() > o2.getValue()) {
-            return -1;
-        } else if (o1.getValue() < o2.getValue()) {
-            return 1;
-        }
-
-        return 0;
+public class NextRoundMessage extends Message {
+    public NextRoundMessage() {
     }
+
+    @Override
+    public Message clone() {
+        return new NextRoundMessage();
+    }
+
 }
