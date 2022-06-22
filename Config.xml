@@ -147,7 +147,7 @@
                 value="RandomTime"/>
 
         <!--Default connectivity model used when none is specified -->
-        <defaultConnectivityModel value="projects.sanders.models.connectivityModels.Coterie"/>
+        <defaultConnectivityModel value="projects.chandra_toueg.models.connectivityModels.MSSConnection"/>
 
         <!--Default distribution model used when none is specified -->
         <defaultDistributionModel value="Grid2D"/>
@@ -162,7 +162,7 @@
         <defaultReliabilityModel value="ReliableDelivery"/>
 
         <!--Default node implementation used when none is specified -->
-        <defaultNodeImplementation value="projects.sanders.nodes.nodeImplementations.SandersNode"/>
+        <defaultNodeImplementation value="projects.chandra_toueg.nodes.nodeImplementations.MSSNode"/>
 
         <!--*********************************************************************** -->
         <!-- Node storage, position transformation -->
@@ -229,8 +229,12 @@
 
     </Framework>
     <Custom>
+        <RandomMessageTransmission distribution="Uniform" min="0.1" max="2"/>
         <Node defaultSize="10"/>
-        <GeometricNodeCollection rMax="100000"/>
+        <GeometricNodeCollection rMax="10000"/>
+        <UDG rMax="300"/>
+        <ProposeValueProbability value="1.0"/>
+        <NackProbability value="0.8"/>
     </Custom>
 </Document>
 
