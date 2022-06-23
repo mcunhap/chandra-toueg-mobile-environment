@@ -38,9 +38,9 @@ package projects.chandra_toueg.nodes.messages;
 
 import java.util.Comparator;
 
-public class ProposeValueComparator implements Comparator<ProposeValueMessage> {
+public class MHValueComparator implements Comparator<MHValueMessage> {
     @Override
-    public int compare(ProposeValueMessage o1, ProposeValueMessage o2) {
+    public int compare(MHValueMessage o1, MHValueMessage o2) {
         if (o1.getTimestamp() > o2.getTimestamp()) {
             return -1;
         } else if (o1.getTimestamp() < o2.getTimestamp()) {

@@ -41,6 +41,7 @@ import lombok.Setter;
 import projects.chandra_toueg.nodes.messages.*;
 import sinalgo.configuration.Configuration;
 import sinalgo.exception.CorruptConfigurationEntryException;
+import sinalgo.exception.SinalgoFatalException;
 import sinalgo.exception.WrongConfigurationException;
 import sinalgo.gui.transformation.PositionTransformation;
 import sinalgo.nodes.Node;
@@ -49,31 +50,43 @@ import sinalgo.nodes.messages.Message;
 import sinalgo.runtime.SinalgoRuntime;
 
 import java.awt.*;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.Random;
+import java.nio.Buffer;
+import java.util.*;
 
 @Getter
 @Setter
 public class MSSNode extends Node {
-    public static final int TOTAL_ROUNDS = 10;
+    private static int radius;
     int round = 0;
 
-    // TODO: get mss nodes dynamically
-    int totalMSSNodes = 4;
+    int totalMSSNodes;
+    int totalMHNodes;
+
     boolean decided = false;
     boolean propose = false;
+    boolean allMHSent = false;
 
     int coordinatorId = 1;
     MSSNode coordinator;
     ArrayList<ProposeValueMessage> coordinatorBuffer;
     ArrayList<AckMessage> ackBuffer;
     ArrayList<NackMessage> nackBuffer;
+    ArrayList<MHValueMessage> mssBuffer;
 
-    int proposedValue = (int) this.getID();
+    Map<Integer, Integer> mssBuffersMap;
+
+    int proposedValue;
     int ts = 0;
 
     double nackProbability = 0.0;
+
+    static {
+        try {
+            radius = Configuration.getIntegerParameter("UDG/rMax");
+        } catch (CorruptConfigurationEntryException e) {
+            throw new SinalgoFatalException(e.getMessage());
+        }
+    }
 
     @Override
     public void handleMessages(Inbox inbox) {
@@ -93,6 +106,10 @@ public class MSSNode extends Node {
                 handleProposedValueDefinedMessage(sender, (ProposedValueDefinedMessage) msg);
             } else if (msg instanceof NextRoundMessage) {
                 handleNextRoundMessage(sender, (NextRoundMessage) msg);
+            } else if (msg instanceof MHValueMessage) {
+                handleMHValueMessage(sender, (MHValueMessage) msg);
+            } else if (msg instanceof BufferSizeMessage) {
+                handleBufferSizeMessage(sender, (BufferSizeMessage) msg);
             }
         }
     }
@@ -152,6 +169,15 @@ public class MSSNode extends Node {
         updateCoordinator();
     }
 
+    private void handleMHValueMessage(Node sender, MHValueMessage msg) {
+        mssBuffer.add(msg);
+        mssBuffersMap.put((int) this.getID(), mssBuffer.size());
+    }
+
+    private void handleBufferSizeMessage(Node sender, BufferSizeMessage msg) {
+        mssBuffersMap.put(msg.getId(), msg.getBufferSize());
+    }
+
     private void broadcastNextRound() {
         NextRoundMessage nextRoundMessage = new NextRoundMessage();
 
@@ -159,22 +185,23 @@ public class MSSNode extends Node {
         broadcast(nextRoundMessage);
     }
 
-
-    private boolean tryProposeValue() {
-        Random random = new Random();
-        double proposeValueProbability = 0.0;
-
-        try {
-            proposeValueProbability = Configuration.getDoubleParameter("ProposeValueProbability");
-        } catch (CorruptConfigurationEntryException e) {
-            e.printStackTrace();
-        }
-
-        return random.nextDouble() <= proposeValueProbability;
-    }
+//    private boolean tryProposeValue() {
+//        Random random = new Random();
+//        double proposeValueProbability = 0.0;
+//
+//        try {
+//            proposeValueProbability = Configuration.getDoubleParameter("ProposeValueProbability");
+//        } catch (CorruptConfigurationEntryException e) {
+//            e.printStackTrace();
+//        }
+//
+//        return random.nextDouble() <= proposeValueProbability;
+//    }
 
     private void proposeValue() {
-        ProposeValueMessage proposeMessage = new ProposeValueMessage(proposedValue, ts);
+        Map<String, Integer> proposedMessage = getMostRecentMHMessage();
+        proposedValue = proposedMessage.get("value");
+        ProposeValueMessage proposeMessage = new ProposeValueMessage(proposedValue, proposedMessage.get("timestamp"));
         System.out.println("Node " + this.getID() + " send proposed value " + proposedValue + " to coordinator " + coordinator.getID());
         propose = true;
         send(proposeMessage, coordinator);
@@ -182,14 +209,15 @@ public class MSSNode extends Node {
 
     @Override
     public void preStep() {
+        totalMSSNodes = discoverTotalMSSNodes();
+        totalMHNodes = discoverTotalMHNodes();
         coordinator = (MSSNode) findCoordinator();
-//        System.out.println("Coordinator: " + coordinator.getID());
-//        update coordinator
-//        coordinatorId = (round % totalMSSNodes + 1);
-//        coordinator = (MSSNode) findCoordinator();
 
-        if (tryProposeValue() && !propose && this.getID() != coordinatorId && !decided) {
-            proposeValue();
+        // TODO: coordinator can propose value too
+        if (!propose && allMHSent && this.getID() != coordinatorId && !decided) {
+            if (!mssBuffer.isEmpty()) {
+                proposeValue();
+            }
         }
 
         if (decided) {
@@ -202,6 +230,8 @@ public class MSSNode extends Node {
         coordinatorBuffer = new ArrayList<ProposeValueMessage>();
         ackBuffer = new ArrayList<AckMessage>();
         nackBuffer = new ArrayList<NackMessage>();
+        mssBuffer = new ArrayList<MHValueMessage>();
+        mssBuffersMap = new HashMap<>();
         coordinator = (MSSNode) findCoordinator();
 
         try {
@@ -210,7 +240,6 @@ public class MSSNode extends Node {
             e.printStackTrace();
         }
     }
-
     @Override
     public void neighborhoodChange() {
     }
@@ -220,15 +249,18 @@ public class MSSNode extends Node {
 
     @Override
     public void draw(Graphics g, PositionTransformation pt, boolean highlight) {
-        super.drawNodeAsSquareWithText(g, pt, highlight, "ID: " + this.getID(), 50, Color.CYAN);
+        Color bckup = g.getColor();
+        super.drawNodeAsSquareWithText(g, pt, highlight, "ID: " + this.getID() + "|R: " + round, 50, Color.CYAN);
+
+        g.setColor(Color.LIGHT_GRAY);
+        pt.translateToGUIPosition(this.getPosition());
+        int r = (int) (radius * pt.getZoomFactor());
+        g.drawOval(pt.getGuiX() - r, pt.getGuiY() - r, r * 2, r * 2);
+        g.setColor(bckup);
     }
 
     @Override
     public void postStep() {
-        if (this.getID() == coordinatorId) {
-            System.out.println("Coordinator buffer size: " + coordinatorBuffer.size());
-        }
-
         // broadcast defined value if coordinator buffer contains at least (n + 1) / 2 values
         if (coordinatorBuffer.size() >= (totalMSSNodes + 1) / 2) {
             int value = getMostRecentProposedValue();
@@ -241,7 +273,20 @@ public class MSSNode extends Node {
             broadcast(tryValueMessage);
         }
 
+        if (!allMHSent) {
+            updateMSSNeighboursBufferSize();
+        }
+
+        checkAllMHSent();
+
+        // Always broadcast notify round message. When any MH node receive this message it update round there and know if can propose another value
+        broadcast(new NotifyRoundMessage(round));
+
         ts++;
+    }
+
+    private void updateMSSNeighboursBufferSize() {
+        broadcast(new BufferSizeMessage(mssBuffer.size(), (int) this.getID()));
     }
 
     @Override
@@ -272,6 +317,15 @@ public class MSSNode extends Node {
         return coordinator;
     }
 
+    private Map<String, Integer> getMostRecentMHMessage() {
+        mssBuffer.sort(new MHValueComparator());
+        Map<String, Integer> mostRecentMessage = new HashMap<>();
+
+        mostRecentMessage.put("value", mssBuffer.get(0).getValue());
+        mostRecentMessage.put("timestamp", mssBuffer.get(0).getValue());
+        return mostRecentMessage;
+    }
+
     private int getMostRecentProposedValue() {
         coordinatorBuffer.sort(new ProposeValueComparator());
 
@@ -284,10 +338,13 @@ public class MSSNode extends Node {
 
     private void initialState() {
         propose = false;
-        proposedValue = (int) this.getID();
+        proposedValue = 0;
+        allMHSent = false;
         coordinatorBuffer.clear();
         ackBuffer.clear();
         nackBuffer.clear();
+        mssBuffer.clear();
+        mssBuffersMap.clear();
     }
 
     private void updateRound() {
@@ -299,5 +356,44 @@ public class MSSNode extends Node {
         coordinatorId = (round % totalMSSNodes + 1);
         coordinator = (MSSNode) findCoordinator();
         System.out.println("New coordinator with ID: " + coordinatorId);
+    }
+
+    private int discoverTotalMSSNodes() {
+        int totalNodes = 0;
+        Iterator<Node> nodes = SinalgoRuntime.getNodes().iterator();
+
+        while (nodes.hasNext()) {
+            Node currentNode = nodes.next();
+
+            if (currentNode instanceof MSSNode) { totalNodes++; }
+        }
+
+        return totalNodes;
+    }
+
+    private int discoverTotalMHNodes() {
+        int totalNodes = 0;
+        Iterator<Node> nodes = SinalgoRuntime.getNodes().iterator();
+
+        while (nodes.hasNext()) {
+            Node currentNode = nodes.next();
+
+            if (currentNode instanceof MHNode) { totalNodes++; }
+        }
+
+        return totalNodes;
+    }
+
+    private void checkAllMHSent() {
+        int totalBuffersSize = 0;
+        for (int size : mssBuffersMap.values()) {
+            totalBuffersSize += size;
+        }
+
+        System.out.println("totalBuffersSize: " + totalBuffersSize + " ID: " + this.getID());
+
+        if (totalBuffersSize == totalMHNodes) {
+            allMHSent = true;
+        }
     }
 }

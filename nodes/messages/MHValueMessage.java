@@ -36,21 +36,27 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 package projects.chandra_toueg.nodes.messages;
 
-import java.util.Comparator;
+import lombok.Getter;
+import lombok.Setter;
+import sinalgo.nodes.messages.Message;
 
-public class ProposeValueComparator implements Comparator<ProposeValueMessage> {
-    @Override
-    public int compare(ProposeValueMessage o1, ProposeValueMessage o2) {
-        if (o1.getTimestamp() > o2.getTimestamp()) {
-            return -1;
-        } else if (o1.getTimestamp() < o2.getTimestamp()) {
-            return 1;
-        } else if (o1.getValue() > o2.getValue()) {
-            return -1;
-        } else if (o1.getValue() < o2.getValue()) {
-            return 1;
-        }
+public class MHValueMessage extends Message {
+    @Getter
+    @Setter
+    private int value;
 
-        return 0;
+    @Getter
+    @Setter
+    private int timestamp;
+
+    public MHValueMessage(int value, int ts) {
+        this.setValue(value);
+        this.setTimestamp(ts);
     }
+
+    @Override
+    public Message clone() {
+        return new MHValueMessage(this.getValue(), this.getTimestamp());
+    }
+
 }

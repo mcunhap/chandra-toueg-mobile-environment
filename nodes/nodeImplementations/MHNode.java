@@ -52,7 +52,11 @@ import java.awt.*;
 @Getter
 @Setter
 public class MHNode extends Node {
-    boolean propose = false;
+    public boolean proposed = false;
+
+    int ts = 0;
+    int round = 0;
+    int proposedValue = (int) this.getID();
 
     @Override
     public void handleMessages(Inbox inbox) {
@@ -60,30 +64,31 @@ public class MHNode extends Node {
             Message msg = inbox.next();
             Node sender = inbox.getSender();
 
-            if (msg instanceof ProposeValueMessage) {
+            if (msg instanceof NotifyRoundMessage) {
+                handleNotifyRoundMessage(sender, (NotifyRoundMessage) msg);
             }
+        }
+    }
+
+    private void handleNotifyRoundMessage(Node sender, NotifyRoundMessage msg) {
+        if (msg.getRound() != round) {
+            round = msg.getRound();
+            proposed = false;
         }
     }
 
     @Override
     public void preStep() {
-        if (!propose && connectedToMSS()) {
+        MSSNode mssNodeConnectedTo = getMSSConnected();
+        if (!proposed && mssNodeConnectedTo != null) {
+            proposeValueToMSS(mssNodeConnectedTo);
         }
     }
-    
-    private boolean connectedToMSS() {
-        ReusableListIterator<Edge> connections = this.getOutgoingConnections().iterator();
-        
-        while (connections.hasNext()) {
-            Edge connection = connections.next();
 
-            if (connection.getEndNode() instanceof MSSNode) {
-                System.out.println("Node: " + this.getID() + " Connected to MSS: " + connection.getEndNode().getID());
-                return true;
-            }
-        }
-
-        return false;
+    private void proposeValueToMSS(MSSNode mssNode) {
+        System.out.println("MHNode: " + this.getID() + " propose " + proposedValue + " to " + mssNode.getID());
+        proposed = true;
+        send(new MHValueMessage(proposedValue, ts), mssNode);
     }
 
     @Override
@@ -100,12 +105,20 @@ public class MHNode extends Node {
 
     @Override
     public void draw(Graphics g, PositionTransformation pt, boolean highlight) {
-        super.drawNodeAsDiskWithText(g, pt, highlight, "MH: " + this.getID(), 25, Color.GREEN);
+        Color color;
+
+        if (proposed) {
+            color = Color.GREEN;
+        } else {
+            color = Color.RED;
+        }
+
+        super.drawNodeAsDiskWithText(g, pt, highlight, "MH: " + this.getID() + "|R: " + round, 25, color);
     }
 
     @Override
     public void postStep() {
-
+        ts++;
     }
 
     @Override
@@ -115,5 +128,24 @@ public class MHNode extends Node {
 
     @Override
     public void checkRequirements() throws WrongConfigurationException {
+    }
+
+    private MSSNode getMSSConnected() {
+        ReusableListIterator<Edge> connections = this.getOutgoingConnections().iterator();
+
+        while (connections.hasNext()) {
+            Edge connection = connections.next();
+
+            if (connection.getEndNode() instanceof MSSNode) {
+//                System.out.println("Node: " + this.getID() + " Connected to MSS: " + connection.getEndNode().getID());
+                return (MSSNode) connection.getEndNode();
+            }
+        }
+
+        return null;
+    }
+
+    public boolean alreadyProposed() {
+        return this.proposed;
     }
 }
