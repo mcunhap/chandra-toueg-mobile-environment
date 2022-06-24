@@ -39,7 +39,6 @@ package projects.chandra_toueg;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
-import projects.sanders.LogL;
 import sinalgo.configuration.Configuration;
 import sinalgo.exception.CorruptConfigurationEntryException;
 import sinalgo.exception.SinalgoFatalException;
@@ -132,7 +131,6 @@ public class CustomGlobal extends AbstractCustomGlobal {
 
     @Override
     public void postRound() {
-        System.out.println("-------------------------");
     }
 
     @Override

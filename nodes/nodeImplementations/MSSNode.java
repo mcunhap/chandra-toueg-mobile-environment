@@ -39,6 +39,7 @@ package projects.chandra_toueg.nodes.nodeImplementations;
 import lombok.Getter;
 import lombok.Setter;
 import projects.chandra_toueg.nodes.messages.*;
+import projects.chandra_toueg.LogL;
 import sinalgo.configuration.Configuration;
 import sinalgo.exception.CorruptConfigurationEntryException;
 import sinalgo.exception.SinalgoFatalException;
@@ -48,6 +49,7 @@ import sinalgo.nodes.Node;
 import sinalgo.nodes.messages.Inbox;
 import sinalgo.nodes.messages.Message;
 import sinalgo.runtime.SinalgoRuntime;
+import sinalgo.tools.logging.Logging;
 
 import java.awt.*;
 import java.nio.Buffer;
@@ -65,6 +67,7 @@ public class MSSNode extends Node {
     boolean decided = false;
     boolean propose = false;
     boolean allMHSent = false;
+    boolean coordinatorAlreadyProposedValue = false;
 
     int coordinatorId = 1;
     MSSNode coordinator;
@@ -79,6 +82,8 @@ public class MSSNode extends Node {
     int ts = 0;
 
     double nackProbability = 0.0;
+
+    Logging logger = Logging.getLogger("mss_logfile.txt");
 
     static {
         try {
@@ -124,10 +129,10 @@ public class MSSNode extends Node {
         Random random = new Random();
 
         if (random.nextDouble() <= nackProbability) {
-            System.out.println("[MSSNode " + this.getID() + "] sending NACK to coordinator");
+            logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] sending NACK to coordinator");
             send(new NackMessage(), coordinator);
         } else {
-            System.out.println("[MSSNode " + this.getID() + "] sending ACK to coordinator");
+            logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] sending ACK to coordinator");
             send(new AckMessage(), coordinator);
         }
     }
@@ -136,7 +141,7 @@ public class MSSNode extends Node {
         ackBuffer.add(msg);
 
         if (ackBuffer.size() >= (totalMSSNodes + 1) / 2) {
-            System.out.println("[Coordinator " + this.getID() + "] Message accepted! Broadcasting value defined: " + proposedValue);
+            logger.logln(LogL.infoLog, "[Coordinator " + this.getID() + "] Message accepted! Broadcasting value defined: " + proposedValue);
             ackBuffer.clear();
             nackBuffer.clear();
 
@@ -151,7 +156,7 @@ public class MSSNode extends Node {
         nackBuffer.add(msg);
 
         if (nackBuffer.size() >= (totalMSSNodes + 1) / 2) {
-            System.out.println("[Coordinator " + this.getID() + "] Message not accepted! Skip round...");
+            logger.logln(LogL.infoLog, "[Coordinator " + this.getID() + "] Message not accepted! Skip round...");
             ackBuffer.clear();
             nackBuffer.clear();
 
@@ -160,6 +165,10 @@ public class MSSNode extends Node {
     }
 
     private void handleProposedValueDefinedMessage(Node sender, ProposedValueDefinedMessage msg) {
+        if (!decided) {
+            logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] consensus reached at " + ts);
+        }
+
         decided = true;
         proposedValue = msg.getValue();
         propose = false;
@@ -192,7 +201,7 @@ public class MSSNode extends Node {
         Map<String, Integer> proposedMessage = getMostRecentMHMessage();
         proposedValue = proposedMessage.get("value");
         ProposeValueMessage proposeMessage = new ProposeValueMessage(proposedValue, proposedMessage.get("timestamp"));
-        System.out.println("[MSSNode " + this.getID() + "] Send proposed value " + proposedValue + " to coordinator " + coordinator.getID());
+        logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] Send proposed value " + proposedValue + " to coordinator " + coordinator.getID());
         propose = true;
 
         send(proposeMessage, coordinator);
@@ -215,7 +224,6 @@ public class MSSNode extends Node {
         }
 
         if (decided) {
-            System.out.println("Consensus reached in value " + proposedValue);
             broadcast(new ProposedValueDefinedMessage(proposedValue));
         }
     }
@@ -265,14 +273,15 @@ public class MSSNode extends Node {
     @Override
     public void postStep() {
         // broadcast defined value if coordinator buffer contains at least (n + 1) / 2 values
-        if (coordinatorBuffer.size() >= (totalMSSNodes + 1) / 2) {
+        if (coordinatorBuffer.size() >= (totalMSSNodes + 1) / 2 && !coordinatorAlreadyProposedValue) {
             int value = getMostRecentProposedValue();
             TryValueMessage tryValueMessage = new TryValueMessage(value);
 
+            coordinatorAlreadyProposedValue = true;
             proposedValue = value;
             coordinatorBuffer.clear();
 
-            System.out.println("[Coordinator " + this.getID() +"] Proposing try value " + tryValueMessage.getValue());
+            logger.logln(LogL.infoLog, "[Coordinator " + this.getID() +"] Proposing try value " + tryValueMessage.getValue());
             broadcast(tryValueMessage);
         }
 
@@ -339,6 +348,7 @@ public class MSSNode extends Node {
         propose = false;
         proposedValue = 0;
         allMHSent = false;
+        coordinatorAlreadyProposedValue = false;
         coordinatorBuffer.clear();
         ackBuffer.clear();
         nackBuffer.clear();
@@ -348,13 +358,13 @@ public class MSSNode extends Node {
 
     private void updateRound() {
         round++;
-        System.out.println("Skip to round: " + round);
+        logger.logln(LogL.infoLog, "Skip to round: " + round);
     }
 
     private void updateCoordinator() {
         coordinatorId = (round % totalMSSNodes + 1);
         coordinator = (MSSNode) findCoordinator();
-        System.out.println("New coordinator with ID: " + coordinatorId);
+        logger.logln(LogL.infoLog, "New coordinator with ID: " + coordinatorId);
     }
 
     private int discoverTotalMSSNodes() {

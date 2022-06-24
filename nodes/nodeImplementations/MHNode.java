@@ -38,6 +38,7 @@ package projects.chandra_toueg.nodes.nodeImplementations;
 
 import lombok.Getter;
 import lombok.Setter;
+import projects.chandra_toueg.LogL;
 import projects.chandra_toueg.nodes.messages.*;
 import sinalgo.exception.WrongConfigurationException;
 import sinalgo.gui.transformation.PositionTransformation;
@@ -45,6 +46,8 @@ import sinalgo.nodes.Node;
 import sinalgo.nodes.edges.Edge;
 import sinalgo.nodes.messages.Inbox;
 import sinalgo.nodes.messages.Message;
+import sinalgo.runtime.SinalgoRuntime;
+import sinalgo.tools.logging.Logging;
 import sinalgo.tools.storage.ReusableListIterator;
 
 import java.awt.*;
@@ -58,6 +61,8 @@ public class MHNode extends Node {
     int ts = 0;
     int round = 0;
     int proposedValue = (int) this.getID();
+
+    Logging logger = Logging.getLogger("mh_logfile.txt");
 
     @Override
     public void handleMessages(Inbox inbox) {
@@ -81,6 +86,10 @@ public class MHNode extends Node {
     }
 
     private void handleProposedValueDefinedMessage(Node sender, ProposedValueDefinedMessage msg) {
+        if (!decided) {
+            logger.logln(LogL.infoLog, "[MHNode " + this.getID() + "] consensus reached at " + ts);
+        }
+
         decided = true;
         proposedValue = msg.getValue();
     }
@@ -91,14 +100,10 @@ public class MHNode extends Node {
         if (!proposed && mssNodeConnectedTo != null) {
             proposeValueToMSS(mssNodeConnectedTo);
         }
-
-        if (decided) {
-            System.out.println("[MHNode " + this.getID() + "] consensus reached");
-        }
     }
 
     private void proposeValueToMSS(MSSNode mssNode) {
-        System.out.println("[MHNode: " + this.getID() + "] Propose " + proposedValue + " to " + mssNode.getID());
+        logger.logln(LogL.infoLog, "[MHNode: " + this.getID() + "] Propose " + proposedValue + " to " + mssNode.getID() + " at " + ts);
         proposed = true;
         send(new MHValueMessage(proposedValue, ts), mssNode);
     }
