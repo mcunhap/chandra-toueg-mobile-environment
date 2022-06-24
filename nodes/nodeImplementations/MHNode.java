@@ -52,7 +52,8 @@ import java.awt.*;
 @Getter
 @Setter
 public class MHNode extends Node {
-    public boolean proposed = false;
+    boolean proposed = false;
+    boolean decided = false;
 
     int ts = 0;
     int round = 0;
@@ -66,6 +67,8 @@ public class MHNode extends Node {
 
             if (msg instanceof NotifyRoundMessage) {
                 handleNotifyRoundMessage(sender, (NotifyRoundMessage) msg);
+            } else if (msg instanceof ProposedValueDefinedMessage) {
+                handleProposedValueDefinedMessage(sender, (ProposedValueDefinedMessage) msg);
             }
         }
     }
@@ -77,16 +80,25 @@ public class MHNode extends Node {
         }
     }
 
+    private void handleProposedValueDefinedMessage(Node sender, ProposedValueDefinedMessage msg) {
+        decided = true;
+        proposedValue = msg.getValue();
+    }
+
     @Override
     public void preStep() {
         MSSNode mssNodeConnectedTo = getMSSConnected();
         if (!proposed && mssNodeConnectedTo != null) {
             proposeValueToMSS(mssNodeConnectedTo);
         }
+
+        if (decided) {
+            System.out.println("[MHNode " + this.getID() + "] consensus reached");
+        }
     }
 
     private void proposeValueToMSS(MSSNode mssNode) {
-        System.out.println("MHNode: " + this.getID() + " propose " + proposedValue + " to " + mssNode.getID());
+        System.out.println("[MHNode: " + this.getID() + "] Propose " + proposedValue + " to " + mssNode.getID());
         proposed = true;
         send(new MHValueMessage(proposedValue, ts), mssNode);
     }
@@ -113,7 +125,11 @@ public class MHNode extends Node {
             color = Color.RED;
         }
 
-        super.drawNodeAsDiskWithText(g, pt, highlight, "MH: " + this.getID() + "|R: " + round, 25, color);
+        if (decided) {
+            color = Color.MAGENTA;
+        }
+
+        super.drawNodeAsDiskWithText(g, pt, highlight, "MH: " + this.getID() + "|R: " + round + "|P: " + proposedValue, 25, color);
     }
 
     @Override
@@ -137,15 +153,10 @@ public class MHNode extends Node {
             Edge connection = connections.next();
 
             if (connection.getEndNode() instanceof MSSNode) {
-//                System.out.println("Node: " + this.getID() + " Connected to MSS: " + connection.getEndNode().getID());
                 return (MSSNode) connection.getEndNode();
             }
         }
 
         return null;
-    }
-
-    public boolean alreadyProposed() {
-        return this.proposed;
     }
 }

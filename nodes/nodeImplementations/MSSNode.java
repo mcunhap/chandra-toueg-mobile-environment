@@ -124,10 +124,10 @@ public class MSSNode extends Node {
         Random random = new Random();
 
         if (random.nextDouble() <= nackProbability) {
-            System.out.println("Node " + this.getID() + "sending NACK to coordinator");
+            System.out.println("[MSSNode " + this.getID() + "] sending NACK to coordinator");
             send(new NackMessage(), coordinator);
         } else {
-            System.out.println("Node " + this.getID() + "sending ACK to coordinator");
+            System.out.println("[MSSNode " + this.getID() + "] sending ACK to coordinator");
             send(new AckMessage(), coordinator);
         }
     }
@@ -136,11 +136,14 @@ public class MSSNode extends Node {
         ackBuffer.add(msg);
 
         if (ackBuffer.size() >= (totalMSSNodes + 1) / 2) {
-            System.out.println("Message accepted! Broadcasting value defined: " + proposedValue);
+            System.out.println("[Coordinator " + this.getID() + "] Message accepted! Broadcasting value defined: " + proposedValue);
             ackBuffer.clear();
             nackBuffer.clear();
 
-            broadcast(new ProposedValueDefinedMessage(proposedValue));
+            ProposedValueDefinedMessage proposedValueDefinedMessage = new ProposedValueDefinedMessage(proposedValue);
+
+            broadcast(proposedValueDefinedMessage);
+            handleProposedValueDefinedMessage(this, proposedValueDefinedMessage);
         }
     }
 
@@ -148,7 +151,7 @@ public class MSSNode extends Node {
         nackBuffer.add(msg);
 
         if (nackBuffer.size() >= (totalMSSNodes + 1) / 2) {
-            System.out.println("Message not accepted! Skip round...");
+            System.out.println("[Coordinator " + this.getID() + "] Message not accepted! Skip round...");
             ackBuffer.clear();
             nackBuffer.clear();
 
@@ -185,26 +188,18 @@ public class MSSNode extends Node {
         broadcast(nextRoundMessage);
     }
 
-//    private boolean tryProposeValue() {
-//        Random random = new Random();
-//        double proposeValueProbability = 0.0;
-//
-//        try {
-//            proposeValueProbability = Configuration.getDoubleParameter("ProposeValueProbability");
-//        } catch (CorruptConfigurationEntryException e) {
-//            e.printStackTrace();
-//        }
-//
-//        return random.nextDouble() <= proposeValueProbability;
-//    }
-
     private void proposeValue() {
         Map<String, Integer> proposedMessage = getMostRecentMHMessage();
         proposedValue = proposedMessage.get("value");
         ProposeValueMessage proposeMessage = new ProposeValueMessage(proposedValue, proposedMessage.get("timestamp"));
-        System.out.println("Node " + this.getID() + " send proposed value " + proposedValue + " to coordinator " + coordinator.getID());
+        System.out.println("[MSSNode " + this.getID() + "] Send proposed value " + proposedValue + " to coordinator " + coordinator.getID());
         propose = true;
+
         send(proposeMessage, coordinator);
+
+        if (this.getID() == coordinatorId) {
+            handleProposeValueMessage(this, proposeMessage);
+        }
     }
 
     @Override
@@ -213,8 +208,7 @@ public class MSSNode extends Node {
         totalMHNodes = discoverTotalMHNodes();
         coordinator = (MSSNode) findCoordinator();
 
-        // TODO: coordinator can propose value too
-        if (!propose && allMHSent && this.getID() != coordinatorId && !decided) {
+        if (!propose && allMHSent && !decided) {
             if (!mssBuffer.isEmpty()) {
                 proposeValue();
             }
@@ -222,6 +216,7 @@ public class MSSNode extends Node {
 
         if (decided) {
             System.out.println("Consensus reached in value " + proposedValue);
+            broadcast(new ProposedValueDefinedMessage(proposedValue));
         }
     }
 
@@ -250,7 +245,15 @@ public class MSSNode extends Node {
     @Override
     public void draw(Graphics g, PositionTransformation pt, boolean highlight) {
         Color bckup = g.getColor();
-        super.drawNodeAsSquareWithText(g, pt, highlight, "ID: " + this.getID() + "|R: " + round, 50, Color.CYAN);
+        Color nodeColor;
+
+        if (!decided) {
+            nodeColor = Color.CYAN;
+        } else {
+            nodeColor = Color.MAGENTA;
+        }
+
+        super.drawNodeAsSquareWithText(g, pt, highlight, "ID: " + this.getID() + "|R: " + round + "|P: " + proposedValue, 50, nodeColor);
 
         g.setColor(Color.LIGHT_GRAY);
         pt.translateToGUIPosition(this.getPosition());
@@ -269,7 +272,7 @@ public class MSSNode extends Node {
             proposedValue = value;
             coordinatorBuffer.clear();
 
-            System.out.println("Broadcasting value " + tryValueMessage.getValue());
+            System.out.println("[Coordinator " + this.getID() +"] Proposing try value " + tryValueMessage.getValue());
             broadcast(tryValueMessage);
         }
 
@@ -329,10 +332,6 @@ public class MSSNode extends Node {
     private int getMostRecentProposedValue() {
         coordinatorBuffer.sort(new ProposeValueComparator());
 
-//        for (int i = 0; i < coordinatorBuffer.size(); i++) {
-//            System.out.println("value: " + coordinatorBuffer.get(i).getValue() + " ts: " + coordinatorBuffer.get(i).getTimestamp());
-//        }
-
         return coordinatorBuffer.get(0).getValue();
     }
 
@@ -389,8 +388,6 @@ public class MSSNode extends Node {
         for (int size : mssBuffersMap.values()) {
             totalBuffersSize += size;
         }
-
-        System.out.println("totalBuffersSize: " + totalBuffersSize + " ID: " + this.getID());
 
         if (totalBuffersSize == totalMHNodes) {
             allMHSent = true;
