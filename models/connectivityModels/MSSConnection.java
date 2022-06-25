@@ -45,7 +45,6 @@ public class MSSConnection extends ConnectivityModelHelper {
             return true;
         } else if (from instanceof MSSNode && to instanceof MHNode || from instanceof MHNode && to instanceof MSSNode) {
             double dist = from.getPosition().squareDistanceTo(to.getPosition());
-            System.out.println("From: " + from.getID() + " To: " + to.getID() + " Dist: " + dist + " RMaxSquare: " + rMaxSquare + " Connected: " + (dist < rMaxSquare));
             return dist < rMaxSquare;
         }
 
