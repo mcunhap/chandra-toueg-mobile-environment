@@ -85,7 +85,7 @@
         <!--Indicates whether all log-files of the current simulation are stored
             in a new directory. The name of the new directory is given by the string-representation
             of the date when the simulation starts. -->
-        <logToTimeDirectory value="false"/>
+        <logToTimeDirectory value="true"/>
 
         <!--If set to true, the system configuration is written to the default
             log file after the application has been started. -->

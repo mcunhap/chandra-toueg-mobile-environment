@@ -166,7 +166,7 @@ public class MSSNode extends Node {
 
     private void handleProposedValueDefinedMessage(Node sender, ProposedValueDefinedMessage msg) {
         if (!decided) {
-            logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] consensus reached at " + ts);
+            logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] consensus reached at " + ts + " round " + round);
         }
 
         decided = true;
