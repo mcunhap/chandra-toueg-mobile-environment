@@ -61,12 +61,228 @@ It is possible to access each model in `nodes/messages` directory.
 
 #### Nodes
 
+To describe both nodes logic I separated both in three phases, `preStep`, `step` and `postStep`, based on how Sinalgo works.  
+
+
+> The preStep phase it is where run everything to prepare node for the next iteration.  
+   
+> The step phase it is where each node handle the incomming messages. At this moment it is possible to handle each kind of message and respond (if it is necessary) to a single node or every neighbour node. 
+   
+> The postStep phase it is where we increase a global timestamp and where we finish logic based on what happen in step phase.  
+
 ##### MSS Node
+
+###### Pre step
+In this phase we need to get three basic informations: 
+
+- Quantity of MSS Nodes to chandra&toueg algorithm work properly
+- Quantity of MH Nodes to know when all MH Nodes has proposed a value
+- Which MSS Node is the coordinator in this round
+
+After know get this three informations we can check if the current MSS Node can propose a value to the coordinator (based on what has been received from MH Nodes).  
+
+Besides that, at this moment if the consensus has been reached the node will broadcast to all connected nodes (note that can be any MSS Node or MH Node) the consensus message. It is important that this broadcast happens all pre step phase after consensus has been reached, because MH Nodes can move, so it is possible to some MH Node get this consensus message some time after it has been reached.
+
+```
+@Override
+public void preStep() {
+    totalMSSNodes = discoverTotalMSSNodes();
+    totalMHNodes = discoverTotalMHNodes();
+    coordinator = (MSSNode) findCoordinator();
+
+    if (!propose && allMHSent && !decided) {
+        if (!mssBuffer.isEmpty()) {
+            proposeValue();
+        }
+    }
+
+    if (decided) {
+        broadcast(new ProposedValueDefinedMessage(proposedValue));
+    }
+}
+```
+###### Step
+
+As mentioned before, in this phase it is where the current node will handle all incomming messages. So, for MSS Nodes it is possible to handle messages from MH Nodes to notify a proposed value, and messages from another MSS Nodes that will be described below.  
+
+First possible message to be handled is coordinator responsability, that is the ProposeValueMessage. With this message the coordinator saves that a value is proposed, and when this buffer gets half filled, than the coordinator try a consensus (happens at post step phase). So, basically, at if coordinator received this message, at this moment it is only a buffer push.
+
+```
+private void handleProposeValueMessage(Node sender, ProposeValueMessage msg) {
+  coordinatorBuffer.add(msg);
+}
+``` 
+
+The second possible message to be handled happens when the coordinator try a consensus. All nodes will check if this coordinator is trustable, and if is will respond with ACK Message, otherwise will responde with NACK Message. In chandra&toueg solution the trustabilty in coordinator is decided by a fault detector, but to simplify the implementation it is used a probability model that can be configured in `Config.xml`.
+
+```
+private void handleTryValueMessage(Node sender, TryValueMessage msg) {
+    Random random = new Random();
+
+    if (random.nextDouble() <= nackProbability) {
+        logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] sending NACK to coordinator");
+        send(new NackMessage(), coordinator);
+    } else {
+        logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] sending ACK to coordinator");
+        send(new AckMessage(), coordinator);
+    }
+}
+```
+Another possible incomming message is ACK Message and NACK Message. This messages will be handled only by coordinator, and increment ackBuffer and nackBuffer to know if the consensus failed or not. If consensus has been reached, than the node broadcast a consensus message, otherwise broadcast a new round message, where all states are reseted and a new coordinator is choose.
+
+```
+private void handleAckMessage(Node sender, AckMessage msg) {
+    ackBuffer.add(msg);
+
+    if (ackBuffer.size() >= (totalMSSNodes + 1) / 2) {
+        logger.logln(LogL.infoLog, "[Coordinator " + this.getID() + "] Message accepted! Broadcasting value defined: " + proposedValue);
+        ackBuffer.clear();
+        nackBuffer.clear();
+
+        ProposedValueDefinedMessage proposedValueDefinedMessage = new ProposedValueDefinedMessage(proposedValue);
+
+        broadcast(proposedValueDefinedMessage);
+        handleProposedValueDefinedMessage(this, proposedValueDefinedMessage);
+    }
+}
+
+private void handleNackMessage(Node sender, NackMessage msg) {
+    nackBuffer.add(msg);
+
+    if (nackBuffer.size() >= (totalMSSNodes + 1) / 2) {
+        logger.logln(LogL.infoLog, "[Coordinator " + this.getID() + "] Message not accepted! Skip round...");
+        ackBuffer.clear();
+        nackBuffer.clear();
+
+        broadcastNextRound();
+    }
+}
+```
+Another possible message is the consensus reached message, where the consensus value is setted for this node and the algorithms end.
+
+```
+private void handleProposedValueDefinedMessage(Node sender, ProposedValueDefinedMessage msg) {
+    if (!decided) {
+        logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] consensus reached at " + ts);
+    }
+
+    decided = true;
+    proposedValue = msg.getValue();
+    propose = false;
+    coordinatorBuffer.clear();
+}
+```
+The last message is the next round message. As mentioned before, with this message every control variables and buffers are reseted to initial state, round is increased and a new coordinator is defined.
+
+```
+private void handleProposedValueDefinedMessage(Node sender, ProposedValueDefinedMessage msg) {
+    if (!decided) {
+        logger.logln(LogL.infoLog, "[MSSNode " + this.getID() + "] consensus reached at " + ts);
+    }
+
+    decided = true;
+    proposedValue = msg.getValue();
+    propose = false;
+    coordinatorBuffer.clear();
+}
+```
+
+
+###### Post step
+
+In this phase happens some notification to MH Nodes, syncronization between MSS Nodes and some coordinator logic.  
+
+First of all the coordinator node check if it is possible to try a consensus based on how many propose messages has received from another MSS Nodes. If his buffer is filled with more than half of possible incomming messages, than it is time to try a consensus.  
+
+After that it is necessary to syncronize how many MH Nodes values each MSS Node has received.  
+
+To end this phase the current MSS Node broadcast to all MH Nodes in range which round is.  
+
+```
+@Override
+public void postStep() {
+    // broadcast defined value if coordinator buffer contains at least (n + 1) / 2 values
+    if (coordinatorBuffer.size() >= (totalMSSNodes + 1) / 2 && !coordinatorAlreadyProposedValue) {
+        int value = getMostRecentProposedValue();
+        TryValueMessage tryValueMessage = new TryValueMessage(value);
+
+        coordinatorAlreadyProposedValue = true;
+        proposedValue = value;
+        coordinatorBuffer.clear();
+
+        logger.logln(LogL.infoLog, "[Coordinator " + this.getID() +"] Proposing try value " + tryValueMessage.getValue());
+        broadcast(tryValueMessage);
+    }
+
+    if (!allMHSent) {
+        updateMSSNeighboursBufferSize();
+    }
+
+    checkAllMHSent();
+
+    // Always broadcast notify round message. When any MH node receive this message it update round there and know if can propose another value
+    broadcast(new NotifyRoundMessage(round));
+
+    ts++;
+}
+```
 
 ##### MH Node
 
+###### Pre step  
+In this phase we get in which MSS Node the current MH Node is connected to. If the current MH Node is connected to any MSS Node, and hasn't proposed any value, than at this moment a value is proposed.
+	
 
-##### Display
+```
+@Override
+public void preStep() {
+  MSSNode mssNodeConnectedTo = getMSSConnected();
+  
+  if (!proposed && mssNodeConnectedTo != null) {
+    proposeValueToMSS(mssNodeConnectedTo);
+  }
+}
+```
+
+###### Step
+In step phase all possible messages received will be handle. The MH Nodes can handle two types of message, one to be notified about a new round, and another to be notified that a consensus has been reached.  
+
+When handle new round message we insure that it is possible to propose another value for this new round.
+
+```
+private void handleNotifyRoundMessage(Node sender, NotifyRoundMessage msg) {
+    if (msg.getRound() != round) {
+        round = msg.getRound();
+        proposed = false;
+    }
+}
+```
+
+When handle consensus reached message the decided control variable is setted and we set the proposed value as the consensus value.
+
+```
+private void handleProposedValueDefinedMessage(Node sender, ProposedValueDefinedMessage msg) {
+    if (!decided) {
+        logger.logln(LogL.infoLog, "[MHNode " + this.getID() + "] consensus reached at " + ts);
+    }
+
+    decided = true;
+    proposedValue = msg.getValue();
+}
+```
+
+###### Post step
+
+In post step phase is where the global timestamp is increased. With this variable is possible to know in which time the current node has been notified with consensus message, and in which time the current node proposed a value.
+
+```
+@Override
+public void postStep() {
+    ts++;
+}
+```
+
+#### Display
 
 To help understand what is happening at Sinalgo's interface were setted texts, custom colors and shapes.  
 
@@ -74,11 +290,10 @@ Squares represents MSS Nodes. Inside there is three informations: the node's id 
 
 Circles represents MH Nodes. Inside there is three informations: the node's id `[MH]`, in which round the node is `[R]` and which value the node propose to one MSS Node. Before the node propose any value his color is red, after propose change to green and after received consensus message change to magenta.  
 
-<p align="center"> 
-	<img src="./images/chandra-toueg-before-consensus" alt="drawing" width="250"/>
-	<img src="./images/chandra-toueg-mss-consensus" alt="drawing" width="250"/>
-	<img src="./images/chandra-toueg-all-consensus" alt="drawing" width="250"/>
-</p>
+![Display example.](./images/chandra-toueg-before-consensus.png)
+![Display example.](./images/chandra-toueg-mss-consensus.png)
+![Display example.](./images/chandra-toueg-all-consensus.png)
+
 
 ### Configuration
 
@@ -117,8 +332,28 @@ This will enable log for MSS Nodes and MH Nodes. Each kind of node has his own l
 In MSS Node log is possible to verify `chandra&toueg` algorithm execution, with MSS Node proposing values to coordinator and sending ACK or NACK to accept the value or not. It will be also possible to see when consensus reach, and in which round each node received consensus message.  
 In MH Node log is possible to verify when each MH node propose a value to a MSS Node and when each node received consensus message.  
 
-### Scenarios:
+### Analysis:
 
+To do some analysis two points have been chosen: MH Nodes quantity that is related to relation between MH Nodes quantity and MSS Nodes quantity and MH Node displacement rate.
+
+#### MH Nodes quantity
+
+At this analysis I fixed the number of MSS Nodes in four, and increase MH Nodes quantity from twelve to twenty by four in each round. The hyphotesis here is that when we increase MH Nodes quantity, consequently decreasing MH/MSS relation, we will have a higher time to reach consensus in MSS Nodes, and a higher time to last MH Node receive consensus message. This happens because with more MH Nodes there is more chance than one node to be out of any MSS Node range, and knowing that for consensus happen it is necessary that all MH Nodes propose messages, this higher times will appear.
+
+![Display example.](./images/first_analysis_mss_consensus.png)
+![Display example.](./images/first_analysis_last_mh_consensus.png)
+
+
+As we can see in the graphics above, our hyphotesis is true.
+
+#### MH Node displacement rate
+
+At this analysis the same scenarios were tested, but increasing MH Node displacement rate from (Speed distribuition="Gaussian" mean="10" variance="20") to (Speed distribuition="Gaussian" mean="20" variance="10"). Our hyphotesis here is that increasing MH Node speed the same scenarios will lead to lower times for reach consensus in MSS Nodes and to last MH Node received consensus message.
+
+![Display example.](./images/second_analysis_mss_consensus.png)
+![Display example.](./images/second_analysis_last_mh_consensus.png)
+
+As we can see in the graphics above, our hyphotesis is true. But we can also verify that the time to reach consensus in MSS Nodes decrease more than time to last MH Nodes receibe consensus message.
 
 # How to execute
 
@@ -129,5 +364,4 @@ In MH Node log is possible to verify when each MH node propose a value to a MSS 
 ### References
 
 [1] [Chandra,Toueg,94]. Chandra, Toueg: Unreliable Failure Detectors for Reliable Distributed Systems (1994), Journal of the ACM, 1994.
-[2] [Chandra,Hadzilacos,Toueg,96] The weakest failure detector for solving
-Consensus, (1996), http://citeseer.ist.psu.edu/chandra96weakest.html
+[2] [Chandra,Hadzilacos,Toueg,96] The weakest failure detector for solving Consensus, (1996), http://citeseer.ist.psu.edu/chandra96weakest.html
